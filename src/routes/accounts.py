@@ -1,12 +1,10 @@
 from datetime import datetime, timezone
-from multiprocessing.util import sub_warning
-from typing import cast, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, joinedload
 
 from config import get_jwt_auth_manager, get_settings, BaseAppSettings
 from database import (
@@ -198,7 +196,7 @@ async def reset_password(
 
 @router.post(
     "/login/",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     response_model=schemas.accounts.UserLoginResponseSchema
 )
 async def login_user(
@@ -259,13 +257,21 @@ async def refresh_token(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
         )
-    refresh_token = await db.scalar(
+    db_refresh_token = await db.scalar(
         select(RefreshTokenModel).
         where(RefreshTokenModel.token == request_data.refresh_token))
-    if not refresh_token:
+    if not db_refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token not found."
+        )
+    if (
+        db_refresh_token.user_id != user_id
+        or db_refresh_token.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token."
         )
     db_user = await db.scalar(
         select(UserModel).
